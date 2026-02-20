@@ -17,6 +17,22 @@ if [ -d "$PWD/package.json" ]; then
     APP_DIR="$PWD"
 fi
 
+ensure_swap() {
+    local swap_size=$(free -m | awk '/^Swap:/{print $2}')
+    if [ "$swap_size" -lt 1500 ]; then
+        echo "Insufficient swap space detected ($swap_size MB). Setting up 2GB swap to prevent out-of-memory errors..."
+        fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
+        chmod 600 /swapfile
+        mkswap /swapfile
+        swapon /swapfile || true
+        # Persist it if not already there
+        if ! grep -q "/swapfile" /etc/fstab; then
+            echo "/swapfile none swap sw 0 0" >> /etc/fstab
+        fi
+        echo "Swap setup complete."
+    fi
+}
+
 show_menu() {
     echo "Please choose an action:"
     echo "  1) Install Panel (Fresh Setup)"
@@ -53,6 +69,10 @@ install_panel() {
     fi
     
     cd "$APP_DIR"
+    
+    # Ensure swap before heavy NPM operations
+    ensure_swap
+    
     npm install
 
     echo "[4/4] Building the application and DB schema..."
@@ -81,6 +101,9 @@ update_panel() {
         git fetch --all
         git reset --hard origin/main
     fi
+
+    # Ensure swap before heavy NPM operations
+    ensure_swap
 
     echo "Installing new dependencies..."
     npm install
