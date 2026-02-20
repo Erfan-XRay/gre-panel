@@ -38,7 +38,7 @@ show_menu() {
 install_panel() {
     echo "[1/4] Updating system and installing prerequisites..."
     apt-get update -y
-    apt-get install -y curl build-essential sqlite3
+    apt-get install -y curl build-essential sqlite3 git
 
     echo "[2/4] Installing Node.js..."
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
@@ -46,6 +46,12 @@ install_panel() {
 
     echo "[3/4] Installing PM2 and application dependencies..."
     npm install -g pm2
+    
+    if [ ! -d "$APP_DIR" ]; then
+        echo "Cloning repository..."
+        git clone https://github.com/Erfan-XRay/gre-panel.git "$APP_DIR"
+    fi
+    
     cd "$APP_DIR"
     npm install
 
@@ -70,6 +76,12 @@ update_panel() {
     echo "Updating GRE/VXLAN Panel..."
     cd "$APP_DIR"
     
+    if [ -d ".git" ]; then
+        echo "Pulling latest changes from Git..."
+        git fetch --all
+        git reset --hard origin/main
+    fi
+
     echo "Installing new dependencies..."
     npm install
     
