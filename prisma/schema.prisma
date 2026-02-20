@@ -1,0 +1,46 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
+
+model Node {
+  id           String   @id @default(uuid())
+  name         String
+  ip           String
+  port         Int      @default(22)
+  username     String   @default("root")
+  password     String?  // Plaintext for SSH execution, or private key
+  privateKey   String?
+  createdAt    DateTime @default(now())
+  
+  // Relations for tunnels
+  localTunnels  Tunnel[] @relation("LocalNode")
+  remoteTunnels Tunnel[] @relation("RemoteNode")
+}
+
+model Tunnel {
+  id           String   @id @default(uuid())
+  type         String   // "gre" or "vxlan"
+  name         String?
+  localIp      String   // Internal tunnel IP on local node (e.g. 10.0.0.1)
+  remoteIp     String   // Internal tunnel IP on remote node (e.g. 10.0.0.2)
+  status       String   @default("active")
+  createdAt    DateTime @default(now())
+
+  localNodeId  String
+  localNode    Node     @relation("LocalNode", fields: [localNodeId], references: [id], onDelete: Cascade)
+  
+  remoteNodeId String
+  remoteNode   Node     @relation("RemoteNode", fields: [remoteNodeId], references: [id], onDelete: Cascade)
+}
