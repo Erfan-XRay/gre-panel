@@ -1,10 +1,10 @@
 #!/bin/bash
-# GRE/VXLAN Premium Web Panel - Manager Script
+# GRE/VXLAN Premium Web Panel - Manager Script (Dockerized)
 
 set -e
 
 echo "===================================================="
-echo "    GRE/VXLAN Panel Manager (Install & Update)      "
+echo "    GRE/VXLAN Panel Manager (Docker Edition)        "
 echo "===================================================="
 
 if [ "$EUID" -ne 0 ]; then
@@ -13,14 +13,14 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 APP_DIR="/root/GrePanel"
-if [ -d "$PWD/package.json" ]; then
+if [ -d "$PWD/docker-compose.yml" ]; then
     APP_DIR="$PWD"
 fi
 
 ensure_swap() {
     local swap_size=$(free -m | awk '/^Swap:/{print $2}')
     if [ "$swap_size" -lt 1500 ]; then
-        echo "Insufficient swap space detected ($swap_size MB). Setting up 2GB swap to prevent out-of-memory errors..."
+        echo "Insufficient swap space detected ($swap_size MB). Setting up 2GB swap to prevent out-of-memory errors during build..."
         fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
         chmod 600 /swapfile
         mkswap /swapfile
@@ -33,9 +33,26 @@ ensure_swap() {
     fi
 }
 
+install_docker() {
+    if ! command -v docker &> /dev/null; then
+        echo "Installing Docker..."
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sh get-docker.sh
+        rm get-docker.sh
+        systemctl enable docker
+        systemctl start docker
+    fi
+
+    if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
+        echo "Installing Docker Compose..."
+        curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+        chmod +x /usr/local/bin/docker-compose
+    fi
+}
+
 show_menu() {
     echo "Please choose an action:"
-    echo "  1) Install Panel (Fresh Setup)"
+    echo "  1) Install Panel (Docker)"
     echo "  2) Update Panel (Keep Database & Configs)"
     echo "  3) Uninstall Panel Completely"
     echo "  4) Exit"
@@ -52,16 +69,15 @@ show_menu() {
 }
 
 install_panel() {
-    echo "[1/4] Updating system and installing prerequisites..."
+    echo "[1/3] Updating system and installing prerequisites..."
     apt-get update -y
-    apt-get install -y curl build-essential sqlite3 git
+    apt-get install -y curl git sqlite3
+    
+    # Ensure swap before heavy Docker builds
+    ensure_swap
 
-    echo "[2/4] Installing Node.js..."
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-    apt-get install -y nodejs
-
-    echo "[3/4] Installing PM2 and application dependencies..."
-    npm install -g pm2
+    echo "[2/3] Installing Docker Environment..."
+    install_docker
     
     if [ ! -d "$APP_DIR" ]; then
         echo "Cloning repository..."
@@ -69,26 +85,19 @@ install_panel() {
     fi
     
     cd "$APP_DIR"
-    
-    # Ensure swap before heavy NPM operations
-    ensure_swap
-    
-    npm install
 
-    echo "[4/4] Building the application and DB schema..."
-    npx prisma generate
-    npx prisma db push
-    npm run build
-
-    echo "===================================================="
-    echo "Starting GRE/VXLAN Panel service..."
-    pm2 start npm --name "grepanel" -- start
-    pm2 save
-    pm2 startup | tail -n 1 | bash -
+    echo "[3/3] Building & Starting Docker Container..."
+    # Always prefer docker compose v2 if available, fallback to v1
+    if docker compose version &> /dev/null; then
+        docker compose up -d --build
+    else
+        docker-compose up -d --build
+    fi
 
     echo "===================================================="
     echo "Installation Complete!"
-    echo "Panel is running target http://$(curl -s ifconfig.me):3000"
+    echo "Panel is running at http://$(curl -s ifconfig.me):3000"
+    echo "Data is persisted safely in Docker Volume/Bind Mounts."
     echo "===================================================="
 }
 
@@ -102,20 +111,15 @@ update_panel() {
         git reset --hard origin/main
     fi
 
-    # Ensure swap before heavy NPM operations
+    echo "Rebuilding and restarting Docker container..."
+    
     ensure_swap
-
-    echo "Installing new dependencies..."
-    npm install
     
-    echo "Migrating DB Schema & Rebuilding Application..."
-    npx prisma generate
-    npx prisma db push
-    npm run build
-    
-    echo "Restarting service..."
-    pm2 restart grepanel
-    pm2 save
+    if docker compose version &> /dev/null; then
+        docker compose up -d --build
+    else
+        docker-compose up -d --build
+    fi
     
     echo "Update Complete without data loss!"
 }
@@ -125,12 +129,22 @@ uninstall_panel() {
     echo "including the SQLite database and all settings."
     read -p "Are you sure? (y/N): " confirm
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
-        echo "Stopping PM2 service..."
-        pm2 stop grepanel || true
-        pm2 delete grepanel || true
-        pm2 save --force || true
+        cd "$APP_DIR" || true
+        echo "Stopping Docker containers..."
+        
+        if docker compose version &> /dev/null; then
+            docker compose down -v || true
+        else
+            docker-compose down -v || true
+        fi
+        
+        echo "Removing PM2 residuals (if migrating from old version)..."
+        pm2 stop grepanel 2>/dev/null || true
+        pm2 delete grepanel 2>/dev/null || true
+        pm2 save --force 2>/dev/null || true
         
         echo "Removing Panel files..."
+        cd /root
         rm -rf "$APP_DIR"
         
         echo "Successfully uninstalled GRE/VXLAN Panel."

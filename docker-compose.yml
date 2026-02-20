@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  grepanel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: grepanel
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./panedata:/app/prisma
+    environment:
+      - DATABASE_URL=file:/app/prisma/dev.db
+      - NODE_ENV=production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
