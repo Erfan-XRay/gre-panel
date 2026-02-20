@@ -51,7 +51,7 @@ export async function POST(request: Request) {
         // Set cookie
         response.cookies.set('auth_token', token, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
+            secure: process.env.NODE_ENV === 'production' && request.headers.get('x-forwarded-proto') === 'https',
             sameSite: 'strict',
             maxAge: 60 * 60 * 24, // 24 hours
             path: '/'
